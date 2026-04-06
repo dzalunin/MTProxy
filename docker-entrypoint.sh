@@ -14,7 +14,7 @@ MT_SECRET_FILE="$MT_CONFIG_DIR/secret"
 : "${MT_STATS_PORT:=8888}"
 : "${MT_HTTP_PORT:=443}"
 : "${MT_MAX_CONNECTIONS:=60000}"
-: "${MT_WORKERS:=2}"
+: "${MT_WORKERS:=1}"
 : "${MT_SECRET_COUNT:=1}"
 : "${MT_SECRET:=}"
 : "${MT_FAKETLS_DOMAIN:=}"
@@ -93,17 +93,24 @@ function update_telegram_proxy_config() {
     chmod 644 "$MT_TELEGRAM_CONFIG"
 }
 
-function new_user_secret() {
-    local secret_hex=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+function new_secret() {
+    head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'
+}
+
+function tg_link() {
+    local secret_hex=$1
+    local external_ip=$2
 
     if [ -n "$MT_FAKETLS_DOMAIN" ]; then
         local domain=$(printf '%s' "$MT_FAKETLS_DOMAIN" | cut -d: -f1 | tr -d ' ')
         local domain_hex=$(printf '%s' "$domain" | od -An -tx1 | tr -d ' \n')
 
-        echo "ee${secret_hex}${domain_hex}"
+        full_secret_hex="ee${secret_hex}${domain_hex}"
     else
-        echo "$secret_hex"
+        full_secret_hex="$secret_hex"
     fi
+
+    echo "https://t.me/proxy?server=${external_ip}&port=${MT_HTTP_PORT}&secret=${full_secret_hex}"
 }
 
 function read_user_secret() {
@@ -123,13 +130,13 @@ function read_user_secret() {
             MT_SECRET_COUNT="1"
         fi
         info "No secret passed. Will generate $MT_SECRET_COUNT random ones."
-        MT_SECRET="$(new_user_secret)"
+        MT_SECRET="$(new_secret)"
         for pass in $(seq 2 "$MT_SECRET_COUNT"); do
-            MT_SECRET="$MT_SECRET,$(new_user_secret)"
+            MT_SECRET="$MT_SECRET,$(new_secret)"
         done
     fi
 
-    if echo "$MT_SECRET" | grep -qE '^([0-9a-fA-F]{32}|ee[0-9a-fA-F]{32,})(,([0-9a-fA-F]{32}|ee[0-9a-fA-F]{32,})){0,15}$'; then
+    if echo "$MT_SECRET" | grep -qE '^[0-9a-fA-F]{32}(,[0-9a-fA-F]{32}){0,15}$'; then
         MT_SECRET="$(echo "$MT_SECRET" | tr '[:upper:]' '[:lower:]')"
         echo "$MT_SECRET" > "$MT_SECRET_FILE"
     else
@@ -179,7 +186,7 @@ function main() {
     IFS=',' read -ra ADDR <<< "$MT_SECRET"
     for secret in "${ADDR[@]}"; do
         PROXY_ARGS+=("-S" "$(echo "$secret" | tr -d '[:space:]')")
-        info "https://t.me/proxy?server=${external_ip}&port=${MT_HTTP_PORT}&secret=${secret}"
+        info "$(tg_link "$secret" "$external_ip")"
     done
 
     exec /usr/bin/mtproto-proxy "${PROXY_ARGS[@]}"

@@ -1,0 +1,19 @@
+---
+
+services:
+  mtproxy:
+    image: ghcr.io/dzalunin/mtproxy:latest
+    container_name: mtproxy
+    ports:
+      - "443:443"
+    environment:
+      - MT_FAKETLS_DOMAIN=www.cloudflare.com
+    volumes:
+      - ./config:/etc/mtproxy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
